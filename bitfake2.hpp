@@ -14,6 +14,7 @@
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <limits>
 namespace fs = std::filesystem;
 
 namespace BitFake
@@ -140,6 +141,176 @@ namespace BitFake
         info.channels = (channelMode == 3) ? 1 : 2;
         info.frameSize = frameSize;
         info.samplesPerFrame = samplesPerFrame;
+        return true;
+    }
+
+    static uint32_t readLE32(const uint8_t* p) {
+        return uint32_t(p[0]) |
+               (uint32_t(p[1]) << 8) |
+               (uint32_t(p[2]) << 16) |
+               (uint32_t(p[3]) << 24);
+    }
+
+    static uint64_t readLE64(const uint8_t* p) {
+        return uint64_t(p[0]) |
+               (uint64_t(p[1]) << 8) |
+               (uint64_t(p[2]) << 16) |
+               (uint64_t(p[3]) << 24) |
+               (uint64_t(p[4]) << 32) |
+               (uint64_t(p[5]) << 40) |
+               (uint64_t(p[6]) << 48) |
+               (uint64_t(p[7]) << 56);
+    }
+
+    struct OggCommentData {
+        std::string Title = "Unknown Title";
+        std::string Artist = "Unknown Artist";
+        std::string Album = "Unknown Album";
+        std::string Date = "Unknown Date";
+        std::string Genre = "Unknown Genre";
+        int TrackNo = 0;
+        int DiscNo = 0;
+        int TotalTracks = 0;
+        int TotalDiscs = 0;
+        int Channels = 0;
+        int SampleRate = 0;
+        uint64_t LastGranule = 0;
+    };
+
+    static void parseVorbisCommentFields(const std::vector<uint8_t>& packet,
+                                         size_t startOffset,
+                                         OggCommentData& out) {
+        if (packet.size() < startOffset + 8) return;
+
+        size_t off = startOffset;
+        auto need = [&](size_t n) { return off + n <= packet.size(); };
+
+        if (!need(4)) return;
+        const uint32_t vendorLen = readLE32(packet.data() + off);
+        off += 4;
+        if (!need(vendorLen)) return;
+        off += vendorLen;
+
+        if (!need(4)) return;
+        const uint32_t commentCount = readLE32(packet.data() + off);
+        off += 4;
+
+        for (uint32_t i = 0; i < commentCount; ++i) {
+            if (!need(4)) break;
+            const uint32_t cLen = readLE32(packet.data() + off);
+            off += 4;
+            if (!need(cLen)) break;
+
+            std::string kv(reinterpret_cast<const char*>(packet.data() + off), cLen);
+            off += cLen;
+
+            const size_t eq = kv.find('=');
+            if (eq == std::string::npos) continue;
+
+            std::string key = kv.substr(0, eq);
+            std::string val = kv.substr(eq + 1);
+            std::transform(key.begin(), key.end(), key.begin(),
+                           [](unsigned char c) { return char(std::toupper(c)); });
+
+            if (key == "TITLE") out.Title = val;
+            else if (key == "ARTIST") out.Artist = val;
+            else if (key == "ALBUM") out.Album = val;
+            else if (key == "DATE" || key == "YEAR") out.Date = val;
+            else if (key == "GENRE") {
+                if (out.Genre == "Unknown Genre" || out.Genre.empty()) out.Genre = val;
+                else if (out.Genre.find(val) == std::string::npos) out.Genre += ";" + val;
+            }
+            else if (key == "TRACKNUMBER") {
+                size_t slash = val.find('/');
+                if (slash != std::string::npos) {
+                    out.TrackNo = parseLeadingInt(val.substr(0, slash));
+                    out.TotalTracks = parseLeadingInt(val.substr(slash + 1));
+                } else {
+                    out.TrackNo = parseLeadingInt(val);
+                }
+            }
+            else if (key == "TOTALTRACKS" || key == "TRACKTOTAL") out.TotalTracks = parseLeadingInt(val);
+            else if (key == "DISCNUMBER") out.DiscNo = parseLeadingInt(val);
+            else if (key == "TOTALDISCS" || key == "DISCTOTAL") out.TotalDiscs = parseLeadingInt(val);
+        }
+    }
+
+    static bool parseOggFamilyMetadata(const fs::path& filepath,
+                                       bool expectOpus,
+                                       OggCommentData& out) {
+        std::ifstream f(filepath, std::ios::binary);
+        if (!f) return false;
+
+        std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        if (data.size() < 27) return false;
+
+        bool seenIdHeader = false;
+        bool seenCommentHeader = false;
+        bool isOpusStream = false;
+        std::vector<uint8_t> packet;
+
+        size_t pos = 0;
+        while (pos + 27 <= data.size()) {
+            if (!(data[pos] == 'O' && data[pos + 1] == 'g' && data[pos + 2] == 'g' && data[pos + 3] == 'S')) {
+                break;
+            }
+
+            const uint64_t granulePos = readLE64(data.data() + pos + 6);
+            if (granulePos != std::numeric_limits<uint64_t>::max()) {
+                out.LastGranule = granulePos;
+            }
+
+            const uint8_t pageSegments = data[pos + 26];
+            const size_t segTableStart = pos + 27;
+            if (segTableStart + pageSegments > data.size()) break;
+
+            size_t pageDataLen = 0;
+            for (uint8_t i = 0; i < pageSegments; ++i) pageDataLen += data[segTableStart + i];
+
+            const size_t pageDataStart = segTableStart + pageSegments;
+            if (pageDataStart + pageDataLen > data.size()) break;
+
+            size_t dataCursor = pageDataStart;
+            for (uint8_t i = 0; i < pageSegments; ++i) {
+                const uint8_t segLen = data[segTableStart + i];
+                packet.insert(packet.end(), data.begin() + dataCursor, data.begin() + dataCursor + segLen);
+                dataCursor += segLen;
+
+                if (segLen < 255) {
+                    if (!seenIdHeader) {
+                        if (packet.size() >= 8 && std::string(reinterpret_cast<const char*>(packet.data()), 8) == "OpusHead") {
+                            isOpusStream = true;
+                            seenIdHeader = true;
+                            if (packet.size() > 9) out.Channels = static_cast<int>(packet[9]);
+                            out.SampleRate = 48000;
+                        } else if (packet.size() >= 30 && packet[0] == 0x01 &&
+                                   std::string(reinterpret_cast<const char*>(packet.data() + 1), 6) == "vorbis") {
+                            isOpusStream = false;
+                            seenIdHeader = true;
+                            out.Channels = static_cast<int>(packet[11]);
+                            out.SampleRate = static_cast<int>(readLE32(packet.data() + 12));
+                        }
+                    } else if (!seenCommentHeader) {
+                        if (isOpusStream && packet.size() >= 8 &&
+                            std::string(reinterpret_cast<const char*>(packet.data()), 8) == "OpusTags") {
+                            parseVorbisCommentFields(packet, 8, out);
+                            seenCommentHeader = true;
+                        } else if (!isOpusStream && packet.size() >= 7 && packet[0] == 0x03 &&
+                                   std::string(reinterpret_cast<const char*>(packet.data() + 1), 6) == "vorbis") {
+                            parseVorbisCommentFields(packet, 7, out);
+                            seenCommentHeader = true;
+                        }
+                    }
+
+                    packet.clear();
+                }
+            }
+
+            pos = pageDataStart + pageDataLen;
+        }
+
+        if (!seenIdHeader) return false;
+        if (expectOpus != isOpusStream) return false;
         return true;
     }
 
@@ -444,6 +615,27 @@ namespace BitFake
 
                     break;
                 }
+                case Codec::AudioCodecType::OGG:
+                case Codec::AudioCodecType::OPUS:
+                {
+                    if (!CheckMagic(filepath, codec)) {
+                        fprintf(stderr, "File does not appear to be a valid OGG/OPUS stream: %s\n", filepath.string().c_str());
+                        return md;
+                    }
+
+                    OggCommentData ogg{};
+                    const bool isOpus = (codec == Codec::AudioCodecType::OPUS);
+                    if (!parseOggFamilyMetadata(filepath, isOpus, ogg)) {
+                        fprintf(stderr, "Failed to parse OGG/OPUS metadata: %s\n", filepath.string().c_str());
+                        return md;
+                    }
+
+                    md.Title = ogg.Title;
+                    md.Artist = ogg.Artist;
+                    md.Album = ogg.Album;
+                    md.Date = ogg.Date;
+                    break;
+                }
 
             default:
                 break;
@@ -731,6 +923,41 @@ namespace BitFake
                     if (md.Duration > 0) {
                         const uint64_t FILESIZE = static_cast<uint64_t>(fs::file_size(filepath));
                         md.Bitrate = static_cast<int>((FILESIZE * 8) / md.Duration / 1000); // in kbps
+                    }
+                    break;
+                }
+                case Codec::AudioCodecType::OGG:
+                case Codec::AudioCodecType::OPUS:
+                {
+                    if (!CheckMagic(filepath, codec)) {
+                        fprintf(stderr, "File does not appear to be a valid OGG/OPUS stream: %s\n", filepath.string().c_str());
+                        return md;
+                    }
+
+                    OggCommentData ogg{};
+                    const bool isOpus = (codec == Codec::AudioCodecType::OPUS);
+                    if (!parseOggFamilyMetadata(filepath, isOpus, ogg)) {
+                        fprintf(stderr, "Failed to parse OGG/OPUS metadata: %s\n", filepath.string().c_str());
+                        return md;
+                    }
+
+                    md.Title = ogg.Title;
+                    md.Artist = ogg.Artist;
+                    md.Album = ogg.Album;
+                    md.Date = ogg.Date;
+                    md.Genre = ogg.Genre;
+                    md.TrackNo = ogg.TrackNo;
+                    md.DiscNo = ogg.DiscNo;
+                    md.TotalTracks = ogg.TotalTracks;
+                    md.TotalDiscs = ogg.TotalDiscs;
+                    md.Channels = ogg.Channels;
+
+                    if (ogg.SampleRate > 0 && ogg.LastGranule > 0) {
+                        md.Duration = static_cast<int>(ogg.LastGranule / static_cast<uint64_t>(ogg.SampleRate));
+                    }
+                    if (md.Duration > 0) {
+                        const uint64_t fileSize = static_cast<uint64_t>(fs::file_size(filepath));
+                        md.Bitrate = static_cast<int>((fileSize * 8ULL) / static_cast<uint64_t>(md.Duration) / 1000ULL);
                     }
                     break;
                 }

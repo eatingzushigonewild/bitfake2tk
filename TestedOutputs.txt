@@ -26,3 +26,17 @@ Total Discs: 0
 Duration: 77 seconds
 Bitrate: 203 kbps
 Channels: 2
+
+-emd ~/ConvertedMusic/03\ -\ Elite.opus 
+Title: Elite
+Artist: Deftones
+Album: White Pony
+Year/Date: 2020
+Genre: Alternative Metal / Art Rock / Metal / Nu Metal / Post-Hardcore / Post-Metal / Rock / Shoegaze
+Track No: 3
+Disc No: 0
+Total Tracks: 0
+Total Discs: 0
+Duration: 241 seconds
+Bitrate: 187 kbps
+Channels: 2

@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
             std::cout << "Title: " << md.Title << std::endl;
             std::cout << "Artist: " << md.Artist << std::endl;
             std::cout << "Album: " << md.Album << std::endl;
-            std::cout << "Year: " << md.Year << std::endl;
+            std::cout << "Year/Date: " << md.Date << std::endl;
         }
 
         if (std::strcmp(argv[i], "-emd") == 0 || std::strcmp(argv[i], "--extendedmd") == 0) {
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
             std::cout << "Title: " << md.Title << std::endl;
             std::cout << "Artist: " << md.Artist << std::endl;
             std::cout << "Album: " << md.Album << std::endl;
-            std::cout << "Year: " << md.Year << std::endl;
+            std::cout << "Year/Date: " << md.Date << std::endl;
             std::cout << "Genre: " << md.Genre << std::endl;
             std::cout << "Track No: " << md.TrackNo << std::endl;
             std::cout << "Disc No: " << md.DiscNo << std::endl;
