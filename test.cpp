@@ -2,8 +2,8 @@
 // you do NOT need to use this at all. this is just testing my shit
 
 #include "bitfake2.hpp"
-#include <iostream>
 #include <cstring>
+#include <iostream>
 
 static std::string toLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
@@ -14,21 +14,35 @@ static std::string toLower(std::string s) {
 static BitFake::Codec::AudioCodecType detectCodec(const fs::path& filepath) {
     const std::string ext = toLower(filepath.extension().string());
 
-    if (ext == ".flac") return BitFake::Codec::AudioCodecType::FLAC;
-    if (ext == ".mp3") return BitFake::Codec::AudioCodecType::MP3;
-    if (ext == ".wav") return BitFake::Codec::AudioCodecType::WAV;
-    if (ext == ".aac") return BitFake::Codec::AudioCodecType::AAC;
-    if (ext == ".ogg") return BitFake::Codec::AudioCodecType::OGG;
-    if (ext == ".opus") return BitFake::Codec::AudioCodecType::OPUS;
-    if (ext == ".aiff" || ext == ".aif") return BitFake::Codec::AudioCodecType::AIFF;
-    if (ext == ".wma") return BitFake::Codec::AudioCodecType::WMA;
+    if (ext == ".flac")
+        return BitFake::Codec::AudioCodecType::FLAC;
+    if (ext == ".mp3")
+        return BitFake::Codec::AudioCodecType::MP3;
+    if (ext == ".wav")
+        return BitFake::Codec::AudioCodecType::WAV;
+    if (ext == ".aac")
+        return BitFake::Codec::AudioCodecType::AAC;
+    if (ext == ".ogg")
+        return BitFake::Codec::AudioCodecType::OGG;
+    if (ext == ".opus")
+        return BitFake::Codec::AudioCodecType::OPUS;
+    if (ext == ".aiff" || ext == ".aif")
+        return BitFake::Codec::AudioCodecType::AIFF;
+    if (ext == ".wma")
+        return BitFake::Codec::AudioCodecType::WMA;
 
-    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::FLAC)) return BitFake::Codec::AudioCodecType::FLAC;
-    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::WAV)) return BitFake::Codec::AudioCodecType::WAV;
-    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::OGG)) return BitFake::Codec::AudioCodecType::OGG;
-    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::OPUS)) return BitFake::Codec::AudioCodecType::OPUS;
-    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::AAC)) return BitFake::Codec::AudioCodecType::AAC;
-    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::MP3)) return BitFake::Codec::AudioCodecType::MP3;
+    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::FLAC))
+        return BitFake::Codec::AudioCodecType::FLAC;
+    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::WAV))
+        return BitFake::Codec::AudioCodecType::WAV;
+    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::OGG))
+        return BitFake::Codec::AudioCodecType::OGG;
+    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::OPUS))
+        return BitFake::Codec::AudioCodecType::OPUS;
+    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::AAC))
+        return BitFake::Codec::AudioCodecType::AAC;
+    if (BitFake::CheckMagic(filepath, BitFake::Codec::AudioCodecType::MP3))
+        return BitFake::Codec::AudioCodecType::MP3;
 
     return BitFake::Codec::AudioCodecType::INVALID;
 }
@@ -36,17 +50,28 @@ static BitFake::Codec::AudioCodecType detectCodec(const fs::path& filepath) {
 static const char* codecToString(BitFake::Codec::AudioCodecType codec) {
     using AudioCodecType = BitFake::Codec::AudioCodecType;
     switch (codec) {
-        case AudioCodecType::MP3: return "MP3";
-        case AudioCodecType::FLAC: return "FLAC";
-        case AudioCodecType::WAV: return "WAV";
-        case AudioCodecType::AAC: return "AAC";
-        case AudioCodecType::OGG: return "OGG";
-        case AudioCodecType::OPUS: return "OPUS";
-        case AudioCodecType::ALAC: return "ALAC";
-        case AudioCodecType::AIFF: return "AIFF";
-        case AudioCodecType::WMA: return "WMA";
-        case AudioCodecType::INVALID: return "INVALID";
-        default: return "INVALID";
+    case AudioCodecType::MP3:
+        return "MP3";
+    case AudioCodecType::FLAC:
+        return "FLAC";
+    case AudioCodecType::WAV:
+        return "WAV";
+    case AudioCodecType::AAC:
+        return "AAC";
+    case AudioCodecType::OGG:
+        return "OGG";
+    case AudioCodecType::OPUS:
+        return "OPUS";
+    case AudioCodecType::ALAC:
+        return "ALAC";
+    case AudioCodecType::AIFF:
+        return "AIFF";
+    case AudioCodecType::WMA:
+        return "WMA";
+    case AudioCodecType::INVALID:
+        return "INVALID";
+    default:
+        return "INVALID";
     }
 }
 
@@ -113,13 +138,15 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "-t") == 0 || std::strcmp(argv[i], "--tag") == 0) {
             if (i + 3 >= argc) {
                 std::cerr << "Error: Missing file path after " << argv[i] << std::endl;
-                std::cerr << "Usage: " << argv[0] << " <audiofile> --tag <field> <value>" << std::endl;
+                std::cerr << "Usage: " << argv[0] << " <audiofile> --tag <field> <value>"
+                          << std::endl;
                 return 1;
             }
             fs::path filepath = argv[++i];
             std::string field = argv[++i];
             std::string value = argv[++i];
-            std::cout << "Testing in-memory tag set: '" << field << "' -> '" << value << "' in " << filepath << std::endl;
+            std::cout << "Testing in-memory tag set: '" << field << "' -> '" << value << "' in "
+                      << filepath << std::endl;
 
             auto session = BitFake::Write::OPENSONG(filepath);
             if (!session) {
@@ -134,7 +161,8 @@ int main(int argc, char** argv) {
 
             const std::string readBack = BitFake::Write::GETFIELD(session, field);
             if (readBack != value) {
-                std::cerr << "Tag test failed: expected '" << value << "' but got '" << readBack << "'" << std::endl;
+                std::cerr << "Tag test failed: expected '" << value << "' but got '" << readBack
+                          << "'" << std::endl;
                 return 1;
             }
 
@@ -143,7 +171,8 @@ int main(int argc, char** argv) {
                 return 1;
             }
 
-            std::cout << "Tag test passed and was written to disk. Field now equals: " << readBack << std::endl;
+            std::cout << "Tag test passed and was written to disk. Field now equals: " << readBack
+                      << std::endl;
         }
     }
 
