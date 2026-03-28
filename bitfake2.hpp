@@ -177,6 +177,27 @@ static uint64_t readLE64(const uint8_t* p) {
            (uint64_t(p[6]) << 48) | (uint64_t(p[7]) << 56);
 }
 
+static bool locateFLACStreamStart(std::ifstream& f, std::streamoff& outOffset) {
+    outOffset = 0;
+    f.clear();
+    f.seekg(0, std::ios::beg);
+
+    std::array<char, 32768> probe{};
+    f.read(probe.data(), static_cast<std::streamsize>(probe.size()));
+    const std::size_t n = static_cast<std::size_t>(f.gcount());
+    if (n < 4)
+        return false;
+
+    for (std::size_t i = 0; i + 3 < n; ++i) {
+        if (probe[i] == 'f' && probe[i + 1] == 'L' && probe[i + 2] == 'a' && probe[i + 3] == 'C') {
+            outOffset = static_cast<std::streamoff>(i);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 struct OggCommentData {
     std::string Title = "Unknown Title";
     std::string Artist = "Unknown Artist";
@@ -437,11 +458,17 @@ static bool CheckMagic(const fs::path& filepath, const Codec::AudioCodecType& ex
     }
 }
 static Codec::AudioCodecType GetCodec(const fs::path& filepath) {
-    for (int i = 0; i <= static_cast<int>(Codec::AudioCodecType::INVALID); ++i) {
-        Codec::AudioCodecType codec = static_cast<Codec::AudioCodecType>(i);
+    static constexpr std::array<Codec::AudioCodecType, 9> probeOrder = {
+        Codec::AudioCodecType::FLAC, Codec::AudioCodecType::WAV,  Codec::AudioCodecType::OGG,
+        Codec::AudioCodecType::OPUS, Codec::AudioCodecType::AAC,  Codec::AudioCodecType::ALAC,
+        Codec::AudioCodecType::AIFF, Codec::AudioCodecType::WMA,  Codec::AudioCodecType::MP3,
+    };
+
+    for (const auto codec : probeOrder) {
         if (CheckMagic(filepath, codec))
             return codec;
     }
+
     return Codec::AudioCodecType::INVALID; // default fallback
 }
 
@@ -567,15 +594,14 @@ class Read {
                 return md;
             }
 
-            f.clear();
-            f.seekg(0, std::ios::beg);
-
-            char sig[4] = {0};
-            f.read(sig, 4);
-            if (f.gcount() != 4 || std::string(sig, 4) != "fLaC") {
+            std::streamoff flacStart = 0;
+            if (!locateFLACStreamStart(f, flacStart)) {
                 fprintf(stderr, "Invalid FLAC signature: %s\n", filepath.string().c_str());
                 return md;
             }
+
+            f.clear();
+            f.seekg(flacStart + 4, std::ios::beg);
 
             bool isLast = false;
             while (!isLast && f) {
@@ -863,15 +889,14 @@ class Read {
                 return md;
             };
 
-            f.clear();
-            f.seekg(0, std::ios::beg);
-
-            char sig[4] = {0};
-            f.read(sig, 4);
-            if (f.gcount() != 4 || std::string(sig, 4) != "fLaC") {
+            std::streamoff flacStart = 0;
+            if (!locateFLACStreamStart(f, flacStart)) {
                 fprintf(stderr, "Invalid FLAC signature: %s\n", filepath.string().c_str());
                 return md;
             }
+
+            f.clear();
+            f.seekg(flacStart + 4, std::ios::beg);
 
             auto parseInt = [](const std::string& str) -> int {
                 int val = 0;
@@ -1072,6 +1097,56 @@ class Write {
         out[3] = static_cast<uint8_t>(value & 0x7F);
     }
 
+    static void writeLE32(uint32_t value, uint8_t out[4]) {
+        out[0] = static_cast<uint8_t>(value & 0xFF);
+        out[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+        out[2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+        out[3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+    }
+
+    static std::vector<uint8_t> buildVorbisCommentBlock(const OpenSongSession& session) {
+        std::vector<uint8_t> block;
+        const std::string vendorStr = "BitFake";
+        uint8_t le[4];
+
+        // Vendor string (length + string)
+        writeLE32(static_cast<uint32_t>(vendorStr.size()), le);
+        block.insert(block.end(), le, le + 4);
+        block.insert(block.end(), vendorStr.begin(), vendorStr.end());
+
+        // Build comment pairs
+        std::vector<std::pair<std::string, std::string>> comments;
+        
+        auto addComment = [&](const std::string& key, const std::string& value) {
+            if (!value.empty())
+                comments.push_back({key, value});
+        };
+
+        addComment("TITLE", GETFIELD(session, "TITLE"));
+        addComment("ARTIST", GETFIELD(session, "ARTIST"));
+        addComment("ALBUM", GETFIELD(session, "ALBUM"));
+        addComment("DATE", GETFIELD(session, "DATE"));
+        addComment("GENRE", GETFIELD(session, "GENRE"));
+        addComment("TRACKNUMBER", GETFIELD(session, "TRACKNUMBER"));
+        addComment("DISCNUMBER", GETFIELD(session, "DISCNUMBER"));
+        addComment("TOTALTRACKS", GETFIELD(session, "TOTALTRACKS"));
+        addComment("TOTALDISCS", GETFIELD(session, "TOTALDISCS"));
+
+        // Write comment count
+        writeLE32(static_cast<uint32_t>(comments.size()), le);
+        block.insert(block.end(), le, le + 4);
+
+        // Write each comment
+        for (const auto& kv : comments) {
+            const std::string comment = kv.first + "=" + kv.second;
+            writeLE32(static_cast<uint32_t>(comment.size()), le);
+            block.insert(block.end(), le, le + 4);
+            block.insert(block.end(), comment.begin(), comment.end());
+        }
+
+        return block;
+    }
+
     static void writeID3v1Field(char* dst, std::size_t len, const std::string& src) {
         std::fill(dst, dst + len, '\0');
         const std::size_t n = std::min(len, src.size());
@@ -1235,10 +1310,10 @@ class Write {
             return true;
         }
 
-        if (session.AudioCodec != Codec::AudioCodecType::MP3) {
-            session.Error = "SAVESONG currently supports MP3 only";
-            return false;
-        }
+        // if (session.AudioCodec != Codec::AudioCodecType::MP3) {
+        //     session.Error = "SAVESONG currently supports MP3 only";
+        //     return false;
+        // }
 
         if (session.AudioData.size() < 3) {
             session.Error = "Audio buffer is too small to write";
@@ -1247,7 +1322,9 @@ class Write {
 
         std::vector<uint8_t> audioCore = session.AudioData;
 
-        if (audioCore.size() >= 10 && audioCore[0] == static_cast<uint8_t>('I') &&
+        switch (session.AudioCodec) {
+            case Codec::AudioCodecType::MP3: {
+            if (audioCore.size() >= 10 && audioCore[0] == static_cast<uint8_t>('I') &&
             audioCore[1] == static_cast<uint8_t>('D') &&
             audioCore[2] == static_cast<uint8_t>('3')) {
             unsigned char sz[4] = {
@@ -1317,8 +1394,134 @@ class Write {
         session.AudioData = std::move(out);
         session.Dirty = false;
         session.Error.clear();
+
+
+
         return true;
-    }
+            }
+            case Codec::AudioCodecType::FLAC: {
+                std::vector<uint8_t> flacData = audioCore;
+                bool recoveredLeadingJunk = false;
+
+                if (flacData.size() < 4 || flacData[0] != 'f' || flacData[1] != 'L' ||
+                    flacData[2] != 'a' || flacData[3] != 'C') {
+                    std::size_t flacOffset = std::string::npos;
+                    for (std::size_t i = 0; i + 3 < flacData.size(); ++i) {
+                        if (flacData[i] == static_cast<uint8_t>('f') &&
+                            flacData[i + 1] == static_cast<uint8_t>('L') &&
+                            flacData[i + 2] == static_cast<uint8_t>('a') &&
+                            flacData[i + 3] == static_cast<uint8_t>('C')) {
+                            flacOffset = i;
+                            break;
+                        }
+                    }
+
+                    if (flacOffset == std::string::npos) {
+                        session.Error = "Invalid FLAC file structure";
+                        return false;
+                    }
+
+                    flacData.erase(flacData.begin(),
+                                   flacData.begin() + static_cast<std::ptrdiff_t>(flacOffset));
+                    recoveredLeadingJunk = true;
+                }
+
+                if (recoveredLeadingJunk && flacData.size() >= 128) {
+                    const std::size_t tail = flacData.size() - 128;
+                    const bool hadTrailingID3v1 =
+                        (flacData[tail] == static_cast<uint8_t>('T') &&
+                         flacData[tail + 1] == static_cast<uint8_t>('A') &&
+                         flacData[tail + 2] == static_cast<uint8_t>('G'));
+                    if (hadTrailingID3v1)
+                        flacData.resize(flacData.size() - 128);
+                }
+
+                std::vector<uint8_t> out;
+                out.insert(out.end(), flacData.begin(), flacData.begin() + 4); // "fLaC"
+
+                size_t pos = 4;
+                std::vector<std::pair<uint8_t, std::vector<uint8_t>>> metadataBlocks;
+
+                // Parse existing metadata blocks
+                while (pos < flacData.size()) {
+                    if (pos + 4 > flacData.size())
+                        break;
+
+                    const uint8_t header = flacData[pos];
+                    const bool isLast = (header & 0x80) != 0;
+                    const uint8_t blockType = header & 0x7F;
+
+                    uint32_t blockLen = (uint32_t(flacData[pos + 1]) << 16) |
+                                        (uint32_t(flacData[pos + 2]) << 8) |
+                                        uint32_t(flacData[pos + 3]);
+
+                    if (pos + 4 + blockLen > flacData.size())
+                        break;
+
+                    if (blockType == 4) {
+                    } else {
+                        std::vector<uint8_t> blockData(flacData.begin() + pos,
+                                                       flacData.begin() + pos + 4 + blockLen);
+                        metadataBlocks.push_back({header, blockData});
+                    }
+
+                    pos += 4 + blockLen;
+                    if (isLast)
+                        break;
+                }
+
+                const std::vector<uint8_t> newCommentData = buildVorbisCommentBlock(session);
+                if (newCommentData.size() > 0xFFFFFF) {
+                    session.Error = "Vorbis comment block too large";
+                    return false;
+                }
+
+                for (size_t i = 0; i < metadataBlocks.size(); ++i) {
+                    auto& block = metadataBlocks[i];
+                    block.first &= 0x7F;
+                    out.insert(out.end(), block.first);
+                    out.insert(out.end(), block.second.begin() + 1, block.second.end());
+                }
+
+                uint8_t commentHeader = 0x84;
+                out.push_back(commentHeader);
+                uint8_t lenBytes[3];
+                lenBytes[0] = static_cast<uint8_t>((newCommentData.size() >> 16) & 0xFF);
+                lenBytes[1] = static_cast<uint8_t>((newCommentData.size() >> 8) & 0xFF);
+                lenBytes[2] = static_cast<uint8_t>(newCommentData.size() & 0xFF);
+                out.insert(out.end(), lenBytes, lenBytes + 3);
+                out.insert(out.end(), newCommentData.begin(), newCommentData.end());
+
+                out.insert(out.end(), flacData.begin() + pos, flacData.end());
+
+                std::ofstream wf(session.Filepath, std::ios::binary | std::ios::trunc);
+                if (!wf) {
+                    session.Error = "Failed to open file for writing";
+                    return false;
+                }
+
+                wf.write(reinterpret_cast<const char*>(out.data()),
+                         static_cast<std::streamsize>(out.size()));
+                if (!wf) {
+                    session.Error = "Failed while writing updated metadata to disk";
+                    return false;
+                }
+
+                session.AudioData = std::move(out);
+                session.Dirty = false;
+                session.Error.clear();
+                return true;
+            }
+            case Codec::AudioCodecType::INVALID:
+                session.Error = "Invalid audio codec, cannot save metadata";
+                return false;
+            default:
+                session.Error = "SAVESONG does not support this codec yet";
+                return false;
+        }
+
+        return true;
+            }
 };
 } // namespace BitFake
 

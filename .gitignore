@@ -1,4 +1,21 @@
 bitftk
+TestMusic/
+*.mp3
+*.flac
+*.ogg
+*.wav
+*.aac
+*.opus
+*.m4a
+*.wma
+*.aiff
+*.alac
+*.pcm
+*.dsd
+*.pcm
+*.dff
+
+# just dont push ur fucking songs into the git repo moron!
 
 # Prerequisites
 *.d
