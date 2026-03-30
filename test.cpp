@@ -4,6 +4,7 @@
 #include "bitfake2.hpp"
 #include <cstring>
 #include <iostream>
+namespace fs = std::filesystem;
 
 static std::string toLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
