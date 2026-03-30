@@ -16,27 +16,27 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-namespace fs = std::filesystem;
 
 namespace BitFake {
+    namespace fs = std::filesystem;
 // defining some basic types and structures for the bitfake2 toolkit
 // goes before getting into the juicy stuff.
 
-static u_int32_t readSynchsafe(const unsigned char b[4]) {
+inline uint32_t readSynchsafe(const unsigned char b[4]) {
     return (uint32_t(b[0]) << 21) | (uint32_t(b[1]) << 14) | (uint32_t(b[2]) << 7) | uint32_t(b[3]);
 }
 
-static std::string trimNulls(std::string str) {
+inline std::string trimNulls(std::string str) {
     while (!str.empty() && (str.back() == '\0' || str.back() == ' '))
         str.pop_back();
     return str;
 }
 
-static uint32_t readBE32(const unsigned char b[4]) {
+inline uint32_t readBE32(const unsigned char b[4]) {
     return (uint32_t(b[0]) << 24) | (uint32_t(b[1]) << 16) | (uint32_t(b[2]) << 8) | uint32_t(b[3]);
 }
 
-static int parseLeadingInt(const std::string& s) {
+inline int parseLeadingInt(const std::string& s) {
     int value = 0;
     bool found = false;
     for (char c : s) {
@@ -50,13 +50,13 @@ static int parseLeadingInt(const std::string& s) {
     return found ? value : 0;
 }
 
-static std::string normalizeMetadataKey(std::string key) {
+inline std::string normalizeMetadataKey(std::string key) {
     std::transform(key.begin(), key.end(), key.begin(),
                    [](unsigned char c) { return char(std::toupper(c)); });
     return key;
 }
 
-static std::string decodeID3TextFrame(const char* data, uint32_t frameSize) {
+inline std::string decodeID3TextFrame(const char* data, uint32_t frameSize) {
     if (frameSize <= 1)
         return "";
     const unsigned char encoding = static_cast<unsigned char>(data[0]);
@@ -85,7 +85,7 @@ struct MP3FrameInfo {
     int samplesPerFrame = 0;
 };
 
-static bool parseMP3FrameHeader(uint32_t h, MP3FrameInfo& info) {
+inline bool parseMP3FrameHeader(uint32_t h, MP3FrameInfo& info) {
     if ((h & 0xFFE00000u) != 0xFFE00000u)
         return false;
 
@@ -167,17 +167,17 @@ static bool parseMP3FrameHeader(uint32_t h, MP3FrameInfo& info) {
     return true;
 }
 
-static uint32_t readLE32(const uint8_t* p) {
+inline uint32_t readLE32(const uint8_t* p) {
     return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
 
-static uint64_t readLE64(const uint8_t* p) {
+inline uint64_t readLE64(const uint8_t* p) {
     return uint64_t(p[0]) | (uint64_t(p[1]) << 8) | (uint64_t(p[2]) << 16) |
            (uint64_t(p[3]) << 24) | (uint64_t(p[4]) << 32) | (uint64_t(p[5]) << 40) |
            (uint64_t(p[6]) << 48) | (uint64_t(p[7]) << 56);
 }
 
-static bool locateFLACStreamStart(std::ifstream& f, std::streamoff& outOffset) {
+inline bool locateFLACStreamStart(std::ifstream& f, std::streamoff& outOffset) {
     outOffset = 0;
     f.clear();
     f.seekg(0, std::ios::beg);
@@ -213,7 +213,7 @@ struct OggCommentData {
     uint64_t LastGranule = 0;
 };
 
-static void parseVorbisCommentFields(const std::vector<uint8_t>& packet, size_t startOffset,
+inline void parseVorbisCommentFields(const std::vector<uint8_t>& packet, size_t startOffset,
                                      OggCommentData& out) {
     if (packet.size() < startOffset + 8)
         return;
@@ -284,7 +284,7 @@ static void parseVorbisCommentFields(const std::vector<uint8_t>& packet, size_t 
     }
 }
 
-static bool parseOggFamilyMetadata(const fs::path& filepath, bool expectOpus, OggCommentData& out) {
+inline bool parseOggFamilyMetadata(const fs::path& filepath, bool expectOpus, OggCommentData& out) {
     std::ifstream f(filepath, std::ios::binary);
     if (!f)
         return false;
@@ -398,7 +398,7 @@ class Codec {
 
 // input: (filepath, expected codec)
 // output: true if the file's magic string matches the expected codec, false otherwise.
-static bool CheckMagic(const fs::path& filepath, const Codec::AudioCodecType& expectedCodec) {
+inline bool CheckMagic(const fs::path& filepath, const Codec::AudioCodecType& expectedCodec) {
     if (!fs::exists(filepath)) {
         fprintf(stderr, "File does not exist: %s\n", filepath.string().c_str());
         return false;
@@ -457,7 +457,7 @@ static bool CheckMagic(const fs::path& filepath, const Codec::AudioCodecType& ex
         return false;
     }
 }
-static Codec::AudioCodecType GetCodec(const fs::path& filepath) {
+inline Codec::AudioCodecType GetCodec(const fs::path& filepath) {
     static constexpr std::array<Codec::AudioCodecType, 9> probeOrder = {
         Codec::AudioCodecType::FLAC, Codec::AudioCodecType::WAV,  Codec::AudioCodecType::OGG,
         Codec::AudioCodecType::OPUS, Codec::AudioCodecType::AAC,  Codec::AudioCodecType::ALAC,
